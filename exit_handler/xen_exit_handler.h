@@ -19,11 +19,127 @@ using namespace intel_x64;
 shared_info_t *shared_info = NULL;
 uintptr_t shared_info_addr = NULL;
 
+#define PAGE_SIZE 4096
+#define XEN_CPUID_FIRST_LEAF 0x40000000
+#define XEN_CPUID_MAX_NUM_LEAVES 4
+
+
 class xen_exit_handler : public exit_handler_intel_x64
 {
  public:
 
 
+    void handle_exit(intel_x64::vmcs::value_type reason) override
+    {
+        if (reason == vmcs::exit_reason::basic_exit_reason::cpuid) {
+            if (m_state_save->rax == 0x40000000)
+                handle_xen_cpuid();
+            else
+                exit_handler_intel_x64::handle_exit(reason);
+        }
+        
+        else if (reason == vmcs::exit_reason::basic_exit_reason::vmcall) {
+            if (m_state_save->rdx != VMCALL_MAGIC_NUMBER)
+                handle_xen_vmcall();
+            else
+                exit_handler_intel_x64::handle_exit(reason);
+
+        }
+
+        else if (reason == vmcs::exit_reason::basic_exit_reason::wrmsr) {
+            if (m_state_save->rcx == 0x40000000)
+                handle_xen_wrmsr();
+            else
+                exit_handler_intel_x64::handle_exit(reason);
+        }
+
+        else
+            exit_handler_intel_x64::handle_exit(reason);
+        
+    }
+    
+    void handle_xen_cpuid()
+    {
+        bfdebug << "Entered correctly" << bfendl;
+            
+        m_state_save->rax = XEN_CPUID_FIRST_LEAF + XEN_CPUID_MAX_NUM_LEAVES;
+        m_state_save->rbx = 0x566e6558;
+        m_state_save->rcx = 0x65584d4d;
+        m_state_save->rdx = 0x4d4d566e;
+        advance_rip();
+       
+        
+    }
+    
+    
+    
+    
+    void handle_xen_vmcall()
+    {
+        auto &&regs = vmcall_registers_t{};
+        
+        
+        
+        /* Handle xen vmcalls */
+        
+        regs.r00 = m_state_save->rax;
+        regs.r01 = m_state_save->rdi;
+        regs.r02 = m_state_save->rsi;
+        regs.r03 = m_state_save->rdx;
+        regs.r04 = m_state_save->r10;
+        regs.r05 = m_state_save->r08;
+        regs.r06 = m_state_save->r09;
+        
+        auto &&ret = guard_exceptions(BF_VMCALL_FAILURE, [&] {
+                switch (m_state_save->rax)
+                    {
+                        
+                    case test_hypercall::init_start_info:
+                        init_start_info(regs);
+                        break;
+                        
+                    case test_hypercall::init_shared_info:
+                        init_shared_info(regs);
+                        break;
+                        
+                    case test_hypercall::update_fake_clock:
+                        update_fake_clock(regs);
+                        break;
+                        
+                    case xen_hypercall::console_io:
+                        handle_vmcall_console_io(regs.r01, regs.r02, regs.r03);
+                        break;
+                        
+                        
+                    default:
+                        throw std::runtime_error("unknown vmcall opcode");
+                    };
+            });
+        complete_vmcall(ret, regs);
+        
+    }
+
+    void init_start_info(vmcall_registers_t &regs)
+    {
+        bfdebug << "RETRIEVED: " << std::hex << regs.r01 << bfendl;
+        auto imap = bfn::make_unique_map_x64<start_info_t>(regs.r01, vmcs::guest_cr3::get(),
+                                                           sizeof(start_info_t),
+                                                           vmcs::guest_ia32_pat::get());
+        start_info_t *start_info = imap.get();
+        
+        strncpy(start_info->magic, "xen-TEST-TEST", 31);
+    }
+   
+    void init_shared_info(vmcall_registers_t &regs)
+    {
+        auto imap = bfn::make_unique_map_x64<shared_info_t>(regs.r01, vmcs::guest_cr3::get(),
+                                                            sizeof(shared_info_t),
+                                                            vmcs::guest_ia32_pat::get());
+        shared_info = imap.get();
+        memset(shared_info, 0, sizeof(shared_info_t));
+        shared_info_addr = regs.r01;
+    }
+    
     void update_fake_clock(vmcall_registers_t &regs)
     {
         auto imap = bfn::make_unique_map_x64<shared_info_t>(shared_info_addr, vmcs::guest_cr3::get(),
@@ -37,37 +153,8 @@ class xen_exit_handler : public exit_handler_intel_x64
         */
     }
     
-    void init_shared_info(vmcall_registers_t &regs)
-    {
-        auto imap = bfn::make_unique_map_x64<shared_info_t>(regs.r01, vmcs::guest_cr3::get(),
-                                                            sizeof(shared_info_t),
-                                                            vmcs::guest_ia32_pat::get());
-        shared_info = imap.get();
-        memset(shared_info, 0, sizeof(shared_info_t));
-        shared_info_addr = regs.r01;
-    }
+   
     
-    void init_start_info(vmcall_registers_t &regs)
-    {
-        bfdebug << "RETRIEVED: " << std::hex << regs.r01 << bfendl;
-        auto imap = bfn::make_unique_map_x64<start_info_t>(regs.r01, vmcs::guest_cr3::get(),
-                                                           sizeof(start_info_t),
-                                                           vmcs::guest_ia32_pat::get());
-        start_info_t *start_info = imap.get();
-        
-        strncpy(start_info->magic, "xen-TEST-TEST", 31);
-    }
-    
-    void test_vmcall(vmcall_registers_t &regs)
-    {
-        auto imap = bfn::make_unique_map_x64<char>(regs.r01, vmcs::guest_cr3::get(), 6,
-                                                   vmcs::guest_ia32_pat::get());
-        
-        bfdebug << vmcs::guest_cr3::get() << bfendl;
-        char *str = imap.get();
-        bfdebug << str << bfendl;
-    }
-
     void handle_vmcall_console_io(uintptr_t rdi, uintptr_t rsi, uintptr_t rdx)
     {
         bfdebug << "console io" << bfendl;
@@ -90,120 +177,62 @@ class xen_exit_handler : public exit_handler_intel_x64
         auto imap = bfn::make_unique_map_x64<char>(rdx, vmcs::guest_cr3::get(), rsi,
                                                    vmcs::guest_ia32_pat::get());
         bfdebug << std::string(imap.get(), rsi) << bfendl;
-        
-        
-        
+
     }
     
     void handle_console_io_read(uintptr_t rsi, uintptr_t rdx)
     {
         bfdebug << "Do console io: read" << bfendl;
     }
-    
-    
-    
-    void handle_vmcall()
+
+
+
+    void handle_xen_wrmsr()
     {
-        auto &&regs = vmcall_registers_t{};
+        auto val = 0ULL;
+        auto msr = gsl::narrow_cast<x64::msrs::field_type>(m_state_save->rcx);
         
-        if (m_state_save->rdx != VMCALL_MAGIC_NUMBER) {
-            
-            /* Handle xen vmcalls */
-            
-            regs.r00 = m_state_save->rax;
-            regs.r01 = m_state_save->rdi;
-            regs.r02 = m_state_save->rsi;
-            regs.r03 = m_state_save->rdx;
-            regs.r04 = m_state_save->r10;
-            regs.r05 = m_state_save->r08;
-            regs.r06 = m_state_save->r09;
-            
-            auto &&ret = guard_exceptions(BF_VMCALL_FAILURE, [&] {
-                    switch (m_state_save->rax)
-                        {
-                            
-                        case test_hypercall::init_start_info:
-                            init_start_info(regs);
-                            break;
-                            
-                        case test_hypercall::init_shared_info:
-                            init_shared_info(regs);
-                            break;
-                            
-                        case test_hypercall::update_fake_clock:
-                            update_fake_clock(regs);
-                            break;
-                            
-                        case xen_hypercall::console_io:
-                            handle_vmcall_console_io(regs.r01, regs.r02, regs.r03);
-                            break;
-                            
-                            
-                        default:
-                            throw std::runtime_error("unknown vmcall opcode");
-                        };
-                });
-            complete_vmcall(ret, regs);
+        val |= ((m_state_save->rax & 0x00000000FFFFFFFF) << 0x00);
+        val |= ((m_state_save->rdx & 0x00000000FFFFFFFF) << 0x20);
+           
+        bfdebug << vmcs::guest_cr3::get() << bfendl;
+        bfdebug << "hypervisor: " << std::hex << val << bfendl;
+        uintptr_t phys_addr = bfn::virt_to_phys_with_cr3(val, vmcs::guest_cr3::get());
+        
+        auto imap = bfn::make_unique_map_x64<uintptr_t>(phys_addr);
+        uintptr_t *page = imap.get();
+        
+        init_hypercall_page(page);
+        advance_rip();
+    }
 
-        } else {
-            
-            /* Handle Bareflank vmcalls */
-            
-            regs.r02 = m_state_save->rcx;
-            regs.r03 = m_state_save->rbx;
-            regs.r04 = m_state_save->rsi;
-            regs.r05 = m_state_save->r08;
-            regs.r06 = m_state_save->r09;
-            regs.r07 = m_state_save->r10;
-            regs.r08 = m_state_save->r11;
-            regs.r09 = m_state_save->r12;
-            regs.r10 = m_state_save->r13;
-            regs.r11 = m_state_save->r14;
-            regs.r12 = m_state_save->r15;
-            
-            auto &&ret = guard_exceptions(BF_VMCALL_FAILURE, [&] {
-                    switch (m_state_save->rax)
-                        {
-                        case VMCALL_VERSIONS:
-                            handle_vmcall_versions(regs);
-                            break;
-                            
-                        case VMCALL_REGISTERS:
-                            handle_vmcall_registers(regs);
-                            break;
-                            
-                        case VMCALL_DATA:
-                            handle_vmcall_data(regs);
-                            break;
-                            
-                        case VMCALL_EVENT:
-                            handle_vmcall_event(regs);
-                            break;
-                            
-                        case VMCALL_START:
-                            handle_vmcall_start(regs);
-                            break;
-                            
-                        case VMCALL_STOP:
-                            handle_vmcall_stop(regs);
-                            break;
-                            
-                        default:
-                            throw std::runtime_error("unknown vmcall opcode");
-                        };
-                });
-
-            complete_vmcall(ret, regs);
-
-        }
+    static void init_hypercall_page(void *hypercall_page)
+    {
+        char *p;
+        int i;
         
-        
-        
+        for ( i = 0; i < (PAGE_SIZE / 32); i++ )
+            {
+                if ( i == 23 ) // skip iret
+                    continue;
+                
+                p = ((char *)(hypercall_page) + (i * 32));
+                *(uint8_t  *)(p + 0) = 0xb8; /* mov imm32, %eax */
+                *(uint32_t *)(p + 1) = i;
+                *(uint8_t  *)(p + 5) = 0x0f; /* vmcall */
+                *(uint8_t  *)(p + 6) = 0x01;
+                *(uint8_t  *)(p + 7) = 0xc1;
+                *(uint8_t  *)(p + 8) = 0xc3; /* ret */
+            }
         
     }
 
-    
 };
+
+
+
+
+
 
 #endif
 
