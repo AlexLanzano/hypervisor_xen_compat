@@ -33,10 +33,12 @@ static int __init driver_start(void)
 	    printk(KERN_ERR "[CONSOLE_IO]: Bareflank is not running. Aborting.\n");
 		goto abort;
 	}
+    
     printk(KERN_INFO "Bareflank is running\n");
 	wrmsrl(0x40000000, (long)hypercall_page);
-
+    
 	/* Check if hypercall_page was populated by Bareflank */
+    
     if ((char *)hypercall_page == 0) {
 		printk(KERN_ERR "[CONSOLE_IO]: hypercall_page was not populated. Aborting.\n");
 		goto abort;

@@ -32,47 +32,43 @@ class xen_exit_handler : public exit_handler_intel_x64
     void handle_exit(intel_x64::vmcs::value_type reason) override
     {
         if (reason == vmcs::exit_reason::basic_exit_reason::cpuid) {
-            if (m_state_save->rax == 0x40000000)
+            if (m_state_save->rax == 0x40000000) {
                 handle_xen_cpuid();
-            else
-                exit_handler_intel_x64::handle_exit(reason);
+                m_vmcs->resume();
+                return;
+            }
         }
         
         else if (reason == vmcs::exit_reason::basic_exit_reason::vmcall) {
-            if (m_state_save->rdx != VMCALL_MAGIC_NUMBER)
+            if (m_state_save->rdx != VMCALL_MAGIC_NUMBER) {
                 handle_xen_vmcall();
-            else
-                exit_handler_intel_x64::handle_exit(reason);
+                m_vmcs->resume();
+                return;
+            }
 
         }
 
         else if (reason == vmcs::exit_reason::basic_exit_reason::wrmsr) {
-            if (m_state_save->rcx == 0x40000000)
+            if (m_state_save->rcx == 0x40000000) {
                 handle_xen_wrmsr();
-            else
-                exit_handler_intel_x64::handle_exit(reason);
+                m_vmcs->resume();
+                return;
+            }
         }
 
-        else
-            exit_handler_intel_x64::handle_exit(reason);
+        exit_handler_intel_x64::handle_exit(reason);
         
     }
     
     void handle_xen_cpuid()
     {
-        bfdebug << "Entered correctly" << bfendl;
-            
+        bfdebug << "Entered correctly" << bfendl; 
         m_state_save->rax = XEN_CPUID_FIRST_LEAF + XEN_CPUID_MAX_NUM_LEAVES;
         m_state_save->rbx = 0x566e6558;
         m_state_save->rcx = 0x65584d4d;
         m_state_save->rdx = 0x4d4d566e;
         advance_rip();
-       
-        
     }
-    
-    
-    
     
     void handle_xen_vmcall()
     {
