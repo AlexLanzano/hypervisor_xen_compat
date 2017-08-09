@@ -1,13 +1,9 @@
-# Bareflank Hypervisor CPUID Count Example
+# Bareflank Xen Compatibility Extension
 
 ## Description
 
-This example demonstrates how to extend the Bareflank hypervisor to print
-the number of CPUID instructions that have executed from when the hypervisor
-was started, to when it was stopped. For more information on how Bareflank
-extensions work, please see the following:
+This is juat a rough start on making Bareflank compatible with Xen guests.
 
-[API Documentation](http://bareflank.github.io/hypervisor/html/)
 
 ## Compilation / Usage
 
@@ -17,12 +13,12 @@ To setup our extension, run the following (assuming Linux):
 cd ~/
 git clone https://github.com/Bareflank/hypervisor.git
 cd ~/hypervisor
-git clone https://github.com/Bareflank/hypervisor_example_cpuidcount.git
+git clone https://github.com/AlexLanzano/hypervisor_xen_compat.git
 
 ./tools/scripts/setup-<xxx>.sh --no-configure
 sudo reboot
 
-~/hypervisor/configure -m ~/hypervisor_example_cpuidcount/bin/cpuidcount.modules
+./configure -m ./hypervisor_xen_compat/bin/xen_compat.modules
 make
 ```
 
@@ -33,8 +29,18 @@ following make shortcuts:
 make driver_load
 make quick
 
-ARGS="string json '{\"get\":\"count\"}'" make vmcall
+cd ./hypervisor_xen_compat/test_drivers/console_io/
+
+make
+sudo insmod console_io.ko
+
+cd ../
+make dump
 
 make stop
 make driver_unload
+
+cd ./hypervisor_xen_compat/test_drivers/console_io/
+sudo rmmod console_io.ko
+
 ```
