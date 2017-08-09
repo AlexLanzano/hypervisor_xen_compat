@@ -37,14 +37,14 @@ endif
 ################################################################################
 
 NATIVE_CCFLAGS+=
+NATIVE_CCFLAGS+=
 NATIVE_CXXFLAGS+=
 NATIVE_ASMFLAGS+=
 NATIVE_LDFLAGS+=
 NATIVE_ARFLAGS+=
 NATIVE_DEFINES+=
 
-CROSS_CCFLAGS+=Wall
-CROSS_CCFLAGS+=Werror
+CROSS_CCFLAGS+=
 CROSS_CXXFLAGS+=
 CROSS_ASMFLAGS+=
 CROSS_LDFLAGS+=

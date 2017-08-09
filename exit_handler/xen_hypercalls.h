@@ -41,7 +41,7 @@ namespace xen_hypercall {
 		const int resource_op = 61;
 		const int get_symbol = 63;
 		 
-	}; 
+	}
 	
 	const int set_debugreg = 8;
 	const int get_debugreg = 9;
@@ -57,7 +57,7 @@ namespace xen_hypercall {
 	namespace console_io_cmd {
 		const int write = 0;
 		const int read = 1;
-	};
+	}
 	
 	const int physdev_op_compat = 19;
 	const int grant_table_op = 20;
@@ -90,7 +90,7 @@ namespace xen_hypercall {
 		const int expand_array = 12;
 		const int set_priority = 13;
 		
-	};
+	}
 	
 	const int physdev_op = 33;
 	const int hvm_op = 34;
@@ -102,7 +102,7 @@ namespace xen_hypercall {
 	const int xenpmu_op = 40;
 	const int dm_op = 41;
 	
-};
+}
 
 void xen_vmcall(struct vmcall_registers_t *regs);
 

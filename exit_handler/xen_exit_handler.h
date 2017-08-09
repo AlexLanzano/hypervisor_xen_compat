@@ -17,7 +17,7 @@
 using namespace intel_x64;
 
 shared_info_t *shared_info = NULL;
-uintptr_t shared_info_addr = NULL;
+uintptr_t shared_info_addr = 0;
 
 #define PAGE_SIZE 4096
 #define XEN_CPUID_FIRST_LEAF 0x40000000
@@ -142,7 +142,7 @@ class xen_exit_handler : public exit_handler_intel_x64
                                                             sizeof(shared_info_t),
                                                             vmcs::guest_ia32_pat::get());
         shared_info = imap.get();
-        shared_info->wc.sec = regs.r01;
+        shared_info->wc.sec = static_cast<unsigned int>(regs.r01);
         /*
           if (shared_info)
           shared_info->wc.sec = regs.r01;
@@ -161,7 +161,7 @@ class xen_exit_handler : public exit_handler_intel_x64
             break;
             
         case xen_hypercall::console_io_cmd::read:
-            handle_console_io_read(rsi, rdx);
+            handle_console_io_read();
             break;
         }
     }
@@ -176,7 +176,7 @@ class xen_exit_handler : public exit_handler_intel_x64
 
     }
     
-    void handle_console_io_read(uintptr_t rsi, uintptr_t rdx)
+    void handle_console_io_read()
     {
         bfdebug << "Do console io: read" << bfendl;
     }
@@ -186,7 +186,6 @@ class xen_exit_handler : public exit_handler_intel_x64
     void handle_xen_wrmsr()
     {
         auto val = 0ULL;
-        auto msr = gsl::narrow_cast<x64::msrs::field_type>(m_state_save->rcx);
         
         val |= ((m_state_save->rax & 0x00000000FFFFFFFF) << 0x00);
         val |= ((m_state_save->rdx & 0x00000000FFFFFFFF) << 0x20);
@@ -204,21 +203,21 @@ class xen_exit_handler : public exit_handler_intel_x64
 
     static void init_hypercall_page(void *hypercall_page)
     {
-        char *p;
-        int i;
+        uint8_t *p;
+        uint32_t i;
         
         for ( i = 0; i < (PAGE_SIZE / 32); i++ )
             {
                 if ( i == 23 ) // skip iret
                     continue;
                 
-                p = ((char *)(hypercall_page) + (i * 32));
-                *(uint8_t  *)(p + 0) = 0xb8; /* mov imm32, %eax */
-                *(uint32_t *)(p + 1) = i;
-                *(uint8_t  *)(p + 5) = 0x0f; /* vmcall */
-                *(uint8_t  *)(p + 6) = 0x01;
-                *(uint8_t  *)(p + 7) = 0xc1;
-                *(uint8_t  *)(p + 8) = 0xc3; /* ret */
+                p = (static_cast<uint8_t*>(hypercall_page) + (i * 32));
+                *static_cast<uint8_t*>(p + 0) = 0xb8; /* mov imm32, %eax */
+                *reinterpret_cast<uint32_t*>(p + 1) = i;
+                *static_cast<uint8_t*>(p + 5) = 0x0f; /* vmcall */
+                *static_cast<uint8_t*>(p + 6) = 0x01;
+                *static_cast<uint8_t*>(p + 7) = 0xc1;
+                *static_cast<uint8_t*>(p + 8) = 0xc3; /* ret */
             }
         
     }
