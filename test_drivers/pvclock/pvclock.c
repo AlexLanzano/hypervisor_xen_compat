@@ -88,7 +88,7 @@ static int __init driver_start(void)
     struct shared_info *shared_info;
     thread_args_t args;
     struct start_info *start_info;
-    
+
     mutex_init(&clock_mutex);
 	// Check if bareflank is running
 	if (hypervisor_cpuid_base2("XenVMMXenVMM", 2) == 0) {
@@ -117,8 +117,10 @@ static int __init driver_start(void)
         printk(KERN_ERR "[PVCLOCK]: start_info is NULL. Aborting.\n");
         goto abort;
     }
-
+    printk(KERN_INFO "start_info: %p\n", start_info);
     make_hypercall(101, (unsigned long)start_info);
+    printk(KERN_INFO "start_info: %p\n", start_info);
+
     
 	printk(KERN_INFO "[PVCLOCK]: initializing start_info page\n");
     if (strcmp(start_info->magic, "xen-TEST-TEST")) {
