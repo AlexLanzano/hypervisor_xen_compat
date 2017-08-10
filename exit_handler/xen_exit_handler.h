@@ -111,8 +111,20 @@ class xen_exit_handler : public exit_handler_intel_x64
                         throw std::runtime_error("unknown vmcall opcode");
                     };
             });
-        complete_vmcall(ret, regs);
+        complete_xen_vmcall(ret, regs);
         
+    }
+
+    void complete_xen_vmcall(ret_type ret, vmcall_registers_t &regs)
+    {
+        m_state_save->rax = regs.r00;
+        m_state_save->rdi = regs.r01;
+        m_state_save->rsi = regs.r02;
+        m_state_save->rdx = regs.r03;
+        m_state_save->r10 = regs.r04;
+        m_state_save->r08 = regs.r05;
+        m_state_save->r09 = regs.r06;
+        advance_rip();
     }
 
     void init_start_info(vmcall_registers_t &regs)
