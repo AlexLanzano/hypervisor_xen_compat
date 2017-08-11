@@ -2,7 +2,7 @@
 
 ## Description
 
-This is juat a rough start on making Bareflank compatible with Xen guests.
+This is just a rough start on making Bareflank compatible with Xen guests.
 
 
 ## Compilation / Usage
