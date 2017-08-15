@@ -25,9 +25,10 @@ typedef struct thread_args {
 struct shared_info *shared_info;
 struct mutex clock_mutex;
 static struct task_struct *update_clock_thread;
+spinlock_t lock;
 
 
-int64_t start_time = -1;
+int64_t sys_sec = 0;
 
 /**
  * clocks_calc_mult_shift - calculate mult/shift factors for scaled math of clocks
@@ -83,68 +84,19 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 	*shift = sft;
 }
 
-#define NANOSECONDS(tsc) (((tsc << shared_info->vcpu_info[0].time.tsc_shift) \
-                           * shared_info->vcpu_info[0].time.tsc_to_system_mul) >> 32)
+#define NANOSECONDS(delta) ((1000000ULL * delta) / tsc_khz)
 
-#define RDTSC(x)     asm volatile ("RDTSC":"=A"(tsc))
 
-int gettimeofday(struct timeval *tp)
+
+inline void make_hypercall0(unsigned long rax)
 {
-	uint64_t tsc;
-	/* Get the time values from the shared info page */
-	uint32_t version, wc_version;
-	uint32_t seconds, nanoseconds;
-	uint64_t old_tsc, system_time;
-
-#if 1
-	/* Loop until we can read all required values from the same update */
-	do
-	{
-		/* Spin if the time value is being updated */
-		do
-		{
-			wc_version = shared_info->wc.version;
-			version = shared_info->vcpu_info[0].time.version;
-		} while(
-				version & (1 == 1)
-				||
-				wc_version & (1 == 1));
-		/* Read the values */
-		seconds = shared_info->wc.sec;
-		nanoseconds = shared_info->wc.nsec;
-		system_time = shared_info->vcpu_info[0].time.system_time;
-		old_tsc = shared_info->vcpu_info[0].time.tsc_timestamp;
-	} while(
-			version != shared_info->vcpu_info[0].time.version
-			||
-			wc_version != shared_info->wc.version
-			);
-#else
-    seconds = 0;
-    nanoseconds = 0;
-    system_time = 0;
-    old_tsc = rdtsc();
-    msleep(500);
-#endif
-    
-	/* Get the current TSC value */
-	tsc = rdtsc();
-	/* Get the number of elapsed cycles */
-	tsc -= old_tsc;
-	/* Update the system time */
-	system_time += NANOSECONDS(tsc);
-	/* Update the nanosecond time */
-	nanoseconds += system_time;
-	/* Move complete seconds to the second counter */
-	seconds += nanoseconds / 1000000000;
-	nanoseconds = nanoseconds % 1000000000;
-	/* Return second and millisecond values */
-	tp->tv_sec = seconds;
-	tp->tv_usec = nanoseconds * 1000;
-	return 0;
+    asm volatile (
+                  "vmcall\n\t"
+                  :
+                  : "a" (rax)
+                  : "memory"
+                  );
 }
-
-
 
 inline void make_hypercall1(unsigned long rax, unsigned long rdi)
 {
@@ -165,37 +117,52 @@ inline void make_hypercall2(unsigned long rax, unsigned long rdi, unsigned long 
                   : "memory"
                   );
 }
+inline void make_hypercall3(unsigned long rax, unsigned long rdi,
+                            unsigned long rsi, unsigned long rdx)
+{
+    asm volatile (
+                  "vmcall\n\t"
+                  :
+                  :  "a" (rax), "D" (rdi), "S" (rsi), "d" (rdx)
+                  : "memory"
+                  );
+}
 
 uint64_t get_elapsed_time(void)
 {
-    uint64_t current_time;
-    if (start_time < 0) 
-        start_time = shared_info->wc.sec;
-    current_time = shared_info->wc.sec;
-    return current_time - start_time;
+    uint64_t tsc, nsec_elapsed;
+    unsigned long flags;
+    uint64_t tsc_timestamp = shared_info->vcpu_info[0].time.tsc_timestamp; 
+    
+    spin_lock_irqsave(&lock, flags);
+    tsc = rdtsc();
+    spin_unlock_irqrestore(&lock, flags);
 
+    tsc -= tsc_timestamp;
+    nsec_elapsed = NANOSECONDS(tsc);
+    return nsec_elapsed / 1000000000;
 }
 
 
 int update_fake_clock(void *data)
 {
-    uint64_t tsc;
-    uint32_t mult;
-    uint32_t shift;
     thread_args_t *args = (thread_args_t*)data;
     
     shared_info = args->shared_info;
 
     
-    clocks_calc_mult_shift(&mult, &shift, tsc_khz, NSEC_PER_MSEC, 0);
-    
     
     while (!kthread_should_stop()) {
-        uint64_t elapsed_time;
-        tsc = rdtsc();
-        make_hypercall1(102, (unsigned long)tsc);
-        elapsed_time = get_elapsed_time();
-        printk(KERN_INFO "[PVCLOCK]: %llu second(s) elapsed\n", elapsed_time);
+        uint64_t sec;
+        make_hypercall1(102, (unsigned long)shared_info);
+        /*
+        
+        //uint64_t new_tsc = tsc;
+        */
+
+        
+        sec = get_elapsed_time();
+        printk(KERN_INFO "[PVCLOCK]: %llu second(s) elapsed\n", sec);
         msleep(500);
     }
     do_exit(0);
@@ -223,9 +190,11 @@ static inline uint32_t hypervisor_cpuid_base2(const char *sig, uint32_t leaves)
 
 bool init_shared_info(void)
 {
-    uint32_t tsc = rdtsc();
+    uint64_t tsc;
+    uint32_t mult, shift;
+    unsigned long flags;
+    struct timespec ts;
 
-    
     printk(KERN_INFO "[PVCLOCK]: initializing shared_info page.\n");
     shared_info = kzalloc(sizeof(struct shared_info), GFP_KERNEL);
     
@@ -233,29 +202,59 @@ bool init_shared_info(void)
         printk(KERN_ERR "[PVCLOCK]: shared_info is NULL. Aborting.\n");
         return false;
     }
-    make_hypercall2(100, (unsigned long)shared_info, tsc);
+
+    clocks_calc_mult_shift(&mult, &shift, tsc_khz, NSEC_PER_MSEC, 0);
+
+    shared_info->vcpu_info[0].time.tsc_to_system_mul = mult;
+    shared_info->vcpu_info[0].time.tsc_shift = (uint8_t)shift;
+
+    spin_lock_irqsave(&lock, flags);
+    getnstimeofday(&ts);
+    tsc = rdtsc();
+    spin_unlock_irqrestore(&lock, flags);
+    shared_info->vcpu_info[0].time.tsc_timestamp = tsc;
+    shared_info->wc.sec = ts.tv_sec;
+    shared_info->wc.nsec = ts.tv_nsec;
+   
+    make_hypercall2(100, (unsigned long)shared_info, tsc_khz);
     return true;
     
 }
 
 static int __init driver_start(void)
 {
+#if 0
+    uint64_t tsc_start, tsc_end, time_elapsed;
+    uint32_t mult, shift;
+    
+    shared_info = kzalloc(sizeof(struct shared_info), GFP_KERNEL);
+    clocks_calc_mult_shift(&mult, &shift, tsc_khz, NSEC_PER_MSEC, 0);
+
+    shared_info->vcpu_info[0].time.tsc_to_system_mul = mult;
+    shared_info->vcpu_info[0].time.tsc_shift = (uint8_t)shift;
+
+    printk(KERN_INFO "tsc_hz: %u\n", tsc_khz / 1000);
+    printk(KERN_INFO "mult: %u\n", mult);
+    printk(KERN_INFO "shift: %u\n", shift);
+    
+    tsc_start = rdtsc();
+    printk(KERN_INFO "tsc_start: %llu\n", tsc_start);
+    ssleep(5);
+    tsc_end = rdtsc();
+    printk(KERN_INFO "tsc_end: %llu\n", tsc_end);
+
+    time_elapsed = NANOSECONDS((tsc_end - tsc_start));
+    printk(KERN_INFO "tsc_end - tsc_start: %llu\n", (tsc_end - tsc_start));
+    printk(KERN_INFO "nsec: %llu\n", time_elapsed);
+    //printk(KERN_INFO "time_elapsed: %llu\n", time_elapsed);
+    goto abort;
+    
+#else
     thread_args_t args;
     struct start_info *start_info;
-    /*
-    uint32_t mult;
-    uint32_t shift;
-    clocks_calc_mult_shift(&mult, &shift, tsc_khz, NSEC_PER_MSEC, 0);
-    
-    printk(KERN_INFO "%u\n", tsc_khz);
-    printk(KERN_INFO "%u\n", mult);
-    printk(KERN_INFO "%u\n", shift);
-
-    printk(KERN_INFO "%llu\n", rdtsc());
-    
-    return 0;
-    */
+   
     mutex_init(&clock_mutex);
+    spin_lock_init(&lock);
 	// Check if bareflank is running
 	if (hypervisor_cpuid_base2("XenVMMXenVMM", 2) == 0) {
 	    printk(KERN_ERR "[PVCLOCK]: Bareflank is not running. Aborting.\n");
@@ -270,7 +269,7 @@ static int __init driver_start(void)
 
     start_info = kzalloc(sizeof(struct start_info), GFP_KERNEL);
 	printk(KERN_INFO "Making vmcall: INIT_START_INFO\n");
-    
+
   
     if (start_info == NULL) {
         printk(KERN_ERR "[PVCLOCK]: start_info is NULL. Aborting.\n");
@@ -287,7 +286,7 @@ static int __init driver_start(void)
         goto abort;
     }
     printk(KERN_INFO "[PVCLOCK]: start_info page initialization success.\n");
-
+#endif
     
  abort:
 	return 0;
