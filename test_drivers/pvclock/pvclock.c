@@ -150,8 +150,6 @@ int update_fake_clock(void *data)
     
     shared_info = args->shared_info;
 
-    
-    
     while (!kthread_should_stop()) {
         uint64_t sec;
         make_hypercall1(102, (unsigned long)shared_info);
@@ -216,6 +214,7 @@ bool init_shared_info(void)
     getnstimeofday(&ts);
     tsc = rdtsc();
     spin_unlock_irqrestore(&lock, flags);
+
     shared_info->vcpu_info[0].time.tsc_timestamp = tsc;
     shared_info->wc.sec = ts.tv_sec;
     shared_info->wc.nsec = ts.tv_nsec;
