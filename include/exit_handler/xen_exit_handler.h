@@ -14,6 +14,7 @@
 
 using namespace intel_x64;
 
+
 #define NANOSECONDS(delta) ((1000000ULL * delta) / tsc_khz)
 
 #define NSEC_PER_MSEC 1000000L

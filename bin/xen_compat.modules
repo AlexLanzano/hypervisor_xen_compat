@@ -18,6 +18,7 @@
         "%BUILD_ABS%/makefiles/bfvmm/src/vcpu/bin/cross/libvcpu.so",
         "%BUILD_ABS%/makefiles/bfvmm/src/vmcs/bin/cross/libvmcs.so",
         "%BUILD_ABS%/makefiles/bfvmm/src/vmxon/bin/cross/libvmxon.so",
-        "%BUILD_ABS%/makefiles/hypervisor_xen_compat/xen_vcpu_factory/bin/cross/libxen_vcpu_factory.so"
+        "%BUILD_ABS%/makefiles/hypervisor_xen_compat/src/xen_vcpu_factory/bin/cross/libxen_vcpu_factory.so",
+        "%BUILD_ABS%/makefiles/hypervisor_xen_compat/src/xen_exit_handler/bin/cross/libxen_exit_handler.so"    
     ]
 }

@@ -23,7 +23,7 @@
 # Target Information
 ################################################################################
 
-TARGET_NAME:=xen_vcpu_factory
+TARGET_NAME:=xen_exit_handler
 TARGET_TYPE:=lib
 
 ifeq ($(shell uname -s), Linux)
@@ -65,12 +65,12 @@ NATIVE_OUTDIR+=%BUILD_REL%/../bin
 # Sources
 ################################################################################
 
-SOURCES+=xen_vcpu_factory.cpp
+SOURCES+=xen_exit_handler.cpp
 
-INCLUDE_PATHS+=../../
-INCLUDE_PATHS+=../../exit_handler
 INCLUDE_PATHS+=%HYPER_ABS%/include/
 INCLUDE_PATHS+=%HYPER_ABS%/bfvmm/include/
+INCLUDE_PATHS+=%HYPER_ABS%/hypervisor_xen_compat/include/
+INCLUDE_PATHS+=%HYPER_ABS%/hypervisor_xen_compat/include/exit_handler/
 
 LIBS+=
 

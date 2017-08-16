@@ -23,7 +23,8 @@
 # Subdirs
 ################################################################################
 
-PARENT_SUBDIRS += src
+PARENT_SUBDIRS += xen_exit_handler
+PARENT_SUBDIRS += xen_vcpu_factory
 
 ################################################################################
 # Common
