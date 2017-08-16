@@ -19,10 +19,7 @@ using namespace intel_x64;
 shared_info_t *shared_info = NULL;
 uintptr_t shared_info_addr = 0;
 unsigned int tsc_khz;
-/*
-#define NANOSECONDS(tsc) (((tsc << shared_info->vcpu_info[0].time.tsc_shift) \
-                           * shared_info->vcpu_info[0].time.tsc_to_system_mul) >> 32)
-*/
+
 
 #define NANOSECONDS(delta) ((1000000ULL * delta) / tsc_khz)
 
@@ -83,9 +80,7 @@ class xen_exit_handler : public exit_handler_intel_x64
     void handle_xen_vmcall()
     {
         auto &&regs = vmcall_registers_t{};
-        
-        
-        
+
         /* Handle xen vmcalls */
         
         regs.r00 = m_state_save->rax;

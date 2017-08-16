@@ -18,17 +18,17 @@
 
 MODULE_LICENSE("GPL");
 
+#define NANOSECONDS(delta) ((1000000ULL * delta) / tsc_khz)
+
 typedef struct thread_args {
     struct shared_info *shared_info;
 } thread_args_t;
 
 struct shared_info *shared_info;
-struct mutex clock_mutex;
+struct start_info *start_info;
 static struct task_struct *update_clock_thread;
 spinlock_t lock;
 
-
-int64_t sys_sec = 0;
 
 /**
  * clocks_calc_mult_shift - calculate mult/shift factors for scaled math of clocks
@@ -84,7 +84,7 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 	*shift = sft;
 }
 
-#define NANOSECONDS(delta) ((1000000ULL * delta) / tsc_khz)
+
 
 
 
@@ -155,11 +155,6 @@ int update_fake_clock(void *data)
     while (!kthread_should_stop()) {
         uint64_t sec;
         make_hypercall1(102, (unsigned long)shared_info);
-        /*
-        
-        //uint64_t new_tsc = tsc;
-        */
-
         
         sec = get_elapsed_time();
         printk(KERN_INFO "[PVCLOCK]: %llu second(s) elapsed\n", sec);
@@ -187,6 +182,15 @@ static inline uint32_t hypervisor_cpuid_base2(const char *sig, uint32_t leaves)
 	return 0;
 }
 
+bool bareflank_is_running(void)
+{
+    if (hypervisor_cpuid_base("XenVMMXenVMM", 2) == 0) {
+	    printk(KERN_ERR "[PVCLOCK]: Bareflank is not running. Aborting.\n");
+		return false;
+	}
+    return true;
+    
+}
 
 bool init_shared_info(void)
 {
@@ -221,45 +225,39 @@ bool init_shared_info(void)
     
 }
 
+bool init_start_info(void)
+{
+	printk(KERN_INFO "[PVCLOCK]: initializing start_info page\n");
+
+    start_info = kzalloc(sizeof(struct start_info), GFP_KERNEL);
+  
+    if (start_info == NULL) {
+        printk(KERN_ERR "[PVCLOCK]: start_info is NULL. Aborting.\n");
+        return false;
+    }
+
+    make_hypercall1(101, (unsigned long)start_info);
+
+    if (strcmp(start_info->magic, "xen-TEST-TEST")) {
+        printk(KERN_ERR "[PVCLOCK]: failed to initialize start_info page. Aborting.\n");
+        return false;
+    }
+
+    return true;
+}
+
+
+
+
 static int __init driver_start(void)
 {
-#if 0
-    uint64_t tsc_start, tsc_end, time_elapsed;
-    uint32_t mult, shift;
-    
-    shared_info = kzalloc(sizeof(struct shared_info), GFP_KERNEL);
-    clocks_calc_mult_shift(&mult, &shift, tsc_khz, NSEC_PER_MSEC, 0);
 
-    shared_info->vcpu_info[0].time.tsc_to_system_mul = mult;
-    shared_info->vcpu_info[0].time.tsc_shift = (uint8_t)shift;
-
-    printk(KERN_INFO "tsc_hz: %u\n", tsc_khz / 1000);
-    printk(KERN_INFO "mult: %u\n", mult);
-    printk(KERN_INFO "shift: %u\n", shift);
-    
-    tsc_start = rdtsc();
-    printk(KERN_INFO "tsc_start: %llu\n", tsc_start);
-    ssleep(5);
-    tsc_end = rdtsc();
-    printk(KERN_INFO "tsc_end: %llu\n", tsc_end);
-
-    time_elapsed = NANOSECONDS((tsc_end - tsc_start));
-    printk(KERN_INFO "tsc_end - tsc_start: %llu\n", (tsc_end - tsc_start));
-    printk(KERN_INFO "nsec: %llu\n", time_elapsed);
-    //printk(KERN_INFO "time_elapsed: %llu\n", time_elapsed);
-    goto abort;
-    
-#else
     thread_args_t args;
-    struct start_info *start_info;
    
-    mutex_init(&clock_mutex);
     spin_lock_init(&lock);
-	// Check if bareflank is running
-	if (hypervisor_cpuid_base2("XenVMMXenVMM", 2) == 0) {
-	    printk(KERN_ERR "[PVCLOCK]: Bareflank is not running. Aborting.\n");
-		goto abort;
-	}
+
+    if (bareflank_is_running() == false)
+        goto abort;
     
     if (init_shared_info() == false)
         goto abort;
@@ -267,27 +265,9 @@ static int __init driver_start(void)
     args.shared_info = shared_info;
     update_clock_thread = kthread_run(update_fake_clock, &args, "update_clock");
 
-    start_info = kzalloc(sizeof(struct start_info), GFP_KERNEL);
-	printk(KERN_INFO "Making vmcall: INIT_START_INFO\n");
-
-  
-    if (start_info == NULL) {
-        printk(KERN_ERR "[PVCLOCK]: start_info is NULL. Aborting.\n");
+    if (init_start_info() == false)
         goto abort;
-    }
-    printk(KERN_INFO "start_info: %p\n", start_info);
-    make_hypercall1(101, (unsigned long)start_info);
-    printk(KERN_INFO "start_info: %p\n", start_info);
 
-    
-	printk(KERN_INFO "[PVCLOCK]: initializing start_info page\n");
-    if (strcmp(start_info->magic, "xen-TEST-TEST")) {
-        printk(KERN_ERR "[PVCLOCK]: failed to initialize start_info page. Aborting.\n");
-        goto abort;
-    }
-    printk(KERN_INFO "[PVCLOCK]: start_info page initialization success.\n");
-#endif
-    
  abort:
 	return 0;
 }
